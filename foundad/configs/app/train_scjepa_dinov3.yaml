@@ -1,0 +1,25 @@
+# @package app
+meta:
+  model: 'dinov3'
+  crop_size: 512
+  pred_depth: 4
+  pred_emb_dim: 384
+  use_bfloat16: false
+  if_pred_pe: false
+  n_layer: 3
+  feat_normed: false
+  loss_mode: 'l2'
+  support_conditioned: true
+  support_shots: 4
+  top_m: 8
+  n_heads: 8
+  support_aggregation: 'mean'  # mean | learned
+  use_rel_pos: true
+  rel_pos_weight: 0.1
+  dropout: 0.0
+  identity_weight: 0.25
+  gate_weight: 0.05
+
+logging:
+  folder: logs/${data.data_name}/${app.meta.model}_scjepa${oc.select:diy_name,""}
+  write_tag: train
