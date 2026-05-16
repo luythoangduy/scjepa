@@ -66,8 +66,22 @@ class HuggingFaceDinoV3Backbone(nn.Module):
     def __init__(self, model_id_or_path: str, image_size: int = 512):
         super().__init__()
         model_path = Path(str(model_id_or_path)).expanduser()
-        kwargs = {"local_files_only": model_path.exists()} if model_path.exists() else {}
+        if model_path.exists() and model_path.is_dir():
+            required = ["config.json", "model.safetensors"]
+            missing = [name for name in required if not (model_path / name).exists()]
+            if missing:
+                raise FileNotFoundError(
+                    f"Hugging Face DINOv3 folder is missing {missing}: {model_path}. "
+                    "Download the full model snapshot, not only one file."
+                )
+        kwargs = {"local_files_only": model_path.exists(), "trust_remote_code": True} if model_path.exists() else {"trust_remote_code": True}
         self.model = AutoModel.from_pretrained(str(model_path) if model_path.exists() else model_id_or_path, **kwargs)
+        model_cls = type(self.model).__name__.lower()
+        if "dino" not in model_cls:
+            raise RuntimeError(
+                f"Expected a DINOv3 Hugging Face model, got {type(self.model).__name__}. "
+                "Please upgrade transformers to >=4.56.0 and re-download the DINOv3 snapshot."
+            )
         self.config = self.model.config
         self.embed_dim = int(getattr(self.config, "hidden_size"))
         self.patch_size = int(getattr(self.config, "patch_size", 16))
