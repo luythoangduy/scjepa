@@ -1,120 +1,111 @@
 import numpy as np
-from sklearn import metrics
+import torch
 from skimage.measure import label, regionprops
+from torchmetrics.functional.classification import (
+    binary_auroc,
+    binary_average_precision,
+    binary_precision_recall_curve,
+    binary_roc,
+)
+
+
+def _as_flat_tensor(values, dtype):
+    if isinstance(values, list):
+        values = np.stack(values, axis=0)
+    if isinstance(values, torch.Tensor):
+        return values.detach().flatten().cpu().to(dtype)
+    return torch.as_tensor(np.asarray(values), dtype=dtype).flatten().cpu()
+
+
+def _to_numpy(values):
+    return values.detach().cpu().numpy()
+
+
+def _compute_binary_retrieval_metrics(scores, labels):
+    scores = _as_flat_tensor(scores, torch.float32)
+    labels = _as_flat_tensor(labels, torch.int32)
+
+    fpr, tpr, roc_thresholds = binary_roc(scores, labels)
+    auroc = binary_auroc(scores, labels)
+
+    precision, recall, pr_thresholds = binary_precision_recall_curve(scores, labels)
+    aupr = binary_average_precision(scores, labels)
+
+    f1_scores = 2.0 * precision * recall / torch.clamp(precision + recall, min=1e-8)
+    best_idx = torch.argmax(f1_scores)
+    if best_idx < len(pr_thresholds):
+        f1_max_threshold = pr_thresholds[best_idx]
+    else:
+        f1_max_threshold = torch.tensor(1.0, dtype=scores.dtype)
+
+    return {
+        "auroc": float(auroc.item()),
+        "fpr": _to_numpy(fpr),
+        "tpr": _to_numpy(tpr),
+        "roc_thresholds": _to_numpy(roc_thresholds),
+        "aupr": float(aupr.item()),
+        "precision": _to_numpy(precision),
+        "recall": _to_numpy(recall),
+        "pr_thresholds": _to_numpy(pr_thresholds),
+        "f1_max": float(f1_scores[best_idx].item()),
+        "f1_max_threshold": float(f1_max_threshold.item())
+    }
 
 
 def compute_imagewise_retrieval_metrics(
     anomaly_prediction_weights,
     anomaly_ground_truth_labels
 ):
-    # --- (1) Compute ROC-related metrics ---
-    fpr, tpr, roc_thresholds = metrics.roc_curve(anomaly_ground_truth_labels, anomaly_prediction_weights)
-    auroc = metrics.roc_auc_score(anomaly_ground_truth_labels, anomaly_prediction_weights)
-
-    # --- (2) Compute PR-related metrics ---
-    precision, recall, pr_thresholds = metrics.precision_recall_curve(anomaly_ground_truth_labels,
-                                                                      anomaly_prediction_weights)
-    aupr = metrics.average_precision_score(anomaly_ground_truth_labels, anomaly_prediction_weights)
-
-    # --- (3) Compute the maximum F1 score and its threshold ---
-    # F1 = 2 * P * R / (P + R)
-    F1_scores = 2.0 * precision * recall / np.clip(precision + recall, 1e-8, None)
-    best_idx = np.argmax(F1_scores)
-    
-    # thresholds array is one element shorter than precision/recall,
-    # so if best_idx == len(pr_thresholds), we handle it separately
-    if best_idx < len(pr_thresholds):
-        f1_max_threshold = pr_thresholds[best_idx]
-    else:
-        f1_max_threshold = 1.0  # or any default value
-    f1_max = F1_scores[best_idx]
-
-    return {
-        "auroc": auroc,
-        "fpr": fpr,
-        "tpr": tpr,
-        "roc_thresholds": roc_thresholds,
-        "aupr": aupr,
-        "precision": precision,
-        "recall": recall,
-        "pr_thresholds": pr_thresholds,
-        "f1_max": f1_max,
-        "f1_max_threshold": f1_max_threshold
-    }
+    return _compute_binary_retrieval_metrics(
+        anomaly_prediction_weights,
+        anomaly_ground_truth_labels,
+    )
 
 
 def compute_pixelwise_retrieval_metrics(
     anomaly_segmentations,
     ground_truth_masks
 ):
-    # If input is a list, convert it to a NumPy array
-    if isinstance(anomaly_segmentations, list):
-        anomaly_segmentations = np.stack(anomaly_segmentations, axis=0)
-    if isinstance(ground_truth_masks, list):
-        ground_truth_masks = np.stack(ground_truth_masks, axis=0)
-
-    # Flatten the arrays so we can feed them into scikit-learn metrics
-    flat_scores = anomaly_segmentations.ravel().astype(np.float32)
-    flat_labels = ground_truth_masks.ravel().astype(np.int32)
-
-    # --- (1) Compute ROC-related metrics ---
-    fpr, tpr, roc_thresholds = metrics.roc_curve(flat_labels, flat_scores)
-    auroc = metrics.roc_auc_score(flat_labels, flat_scores)
-
-    # --- (2) Compute PR-related metrics ---
-    precision, recall, pr_thresholds = metrics.precision_recall_curve(flat_labels, flat_scores)
-    aupr = metrics.average_precision_score(flat_labels, flat_scores)
-
-    # --- (3) Compute the maximum F1 score and its threshold ---
-    F1_scores = 2.0 * precision * recall / np.clip(precision + recall, 1e-8, None)
-    best_idx = np.argmax(F1_scores)
-    
-    # Handle the index offset in thresholds
-    if best_idx < len(pr_thresholds):
-        f1_max_threshold = pr_thresholds[best_idx]
-    else:
-        f1_max_threshold = 1.0
-    f1_max = F1_scores[best_idx]
-
-    return {
-        "auroc": auroc,
-        "fpr": fpr,
-        "tpr": tpr,
-        "roc_thresholds": roc_thresholds,
-        "aupr": aupr,
-        "precision": precision,
-        "recall": recall,
-        "pr_thresholds": pr_thresholds,
-        "f1_max": f1_max,
-        "f1_max_threshold": f1_max_threshold
-    }
+    return _compute_binary_retrieval_metrics(
+        anomaly_segmentations,
+        ground_truth_masks,
+    )
 
 
 def calculate_pro(masks, scores, max_steps=200, expect_fpr=0.3):
-    thresholds = np.linspace(scores.min(), scores.max(), max_steps)
+    if isinstance(masks, list):
+        masks = np.stack(masks, axis=0)
+    if isinstance(scores, list):
+        scores = np.stack(scores, axis=0)
+
+    masks_np = np.asarray(masks).astype(np.uint8)
+    scores_t = torch.as_tensor(np.asarray(scores), dtype=torch.float32).cpu()
+    masks_t = torch.as_tensor(masks_np, dtype=torch.bool).cpu()
+    thresholds = torch.linspace(scores_t.min(), scores_t.max(), max_steps)
     pros = []
     fprs = []
 
     for threshold in thresholds:
-        binary_scores = (scores > threshold).astype(int)
+        binary_scores_t = scores_t > threshold
+        binary_scores_np = binary_scores_t.numpy().astype(np.uint8)
 
         # Calculate Pro
         pro_values = []
-        for binary_score, mask in zip(binary_scores, masks):
+        for binary_score, mask in zip(binary_scores_np, masks_np):
             regions = regionprops(label(mask))
             for region in regions:
                 tp_pixels = binary_score[region.coords[:, 0], region.coords[:, 1]].sum()
                 pro_values.append(tp_pixels / region.area)
-        pros.append(np.mean(pro_values))
+        pros.append(float(np.mean(pro_values)) if pro_values else 0.0)
 
         # Calculate FPR
-        inverse_masks = 1 - masks
-        fp_pixels = np.logical_and(inverse_masks, binary_scores).sum()
-        fpr = fp_pixels / inverse_masks.sum()
+        inverse_masks = ~masks_t
+        fp_pixels = torch.logical_and(inverse_masks, binary_scores_t).sum()
+        fpr = fp_pixels.float() / torch.clamp(inverse_masks.sum().float(), min=1.0)
         fprs.append(fpr)
 
-    pros = np.array(pros)
-    fprs = np.array(fprs)
+    pros = torch.as_tensor(pros, dtype=torch.float32)
+    fprs = torch.stack(fprs).float()
 
     # Filter FPRs below the expected threshold
     valid_idxs = fprs <= expect_fpr
@@ -123,7 +114,14 @@ def calculate_pro(masks, scores, max_steps=200, expect_fpr=0.3):
 
     # Normalize FPRs for AUC computation
     if len(fprs) > 1:
-        fprs = (fprs - fprs.min()) / (fprs.max() - fprs.min())
-    pro_auc = metrics.auc(fprs, pros) if len(fprs) > 1 else 0.0
+        fpr_range = fprs.max() - fprs.min()
+        if fpr_range > 0:
+            fprs = (fprs - fprs.min()) / fpr_range
+            order = torch.argsort(fprs)
+            pro_auc = torch.trapezoid(pros[order], fprs[order]).item()
+        else:
+            pro_auc = 0.0
+    else:
+        pro_auc = 0.0
 
     return pro_auc
