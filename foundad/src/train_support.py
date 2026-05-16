@@ -125,6 +125,14 @@ class SupportTrainer:
         self.gate_weight = float(mcfg.get("gate_weight", 0.05))
         self.support_shots = int(mcfg.get("support_shots", args["data"].get("support_shots", 4)))
         self.use_bf16 = mcfg["use_bfloat16"]
+        self.corruption_mode = mcfg.get("corruption_mode", "feature_perturbation")
+        self.perturb_min_ratio = float(mcfg.get("perturb_min_ratio", 0.02))
+        self.perturb_max_ratio = float(mcfg.get("perturb_max_ratio", 0.15))
+        self.perturb_noise_scale = float(mcfg.get("perturb_noise_scale", 0.25))
+        self.perturb_num_blocks = int(mcfg.get("perturb_num_blocks", 2))
+        if self.corruption_mode not in {"feature_perturbation", "cutpaste"}:
+            raise ValueError(f"Unsupported corruption_mode: {self.corruption_mode}")
+        logger.info("SC-JEPA corruption mode: %s", self.corruption_mode)
 
         self.model.predictor.requires_grad_(True)
         if self.model.projector:
@@ -147,7 +155,7 @@ class SupportTrainer:
         )
         self.support_bank = SupportBank(dcfg["train_root"], mcfg["crop_size"], self.support_shots)
         self.support_bank.build_feature_cache(self.model, self.device, self.n_layer, self.use_bf16)
-        self.cutpaste = CutPasteUnion(colorJitter=0.5)
+        self.cutpaste = CutPasteUnion(colorJitter=0.5) if self.corruption_mode == "cutpaste" else None
 
         ocfg = args["optimization"]
         self.optimizer, self.scheduler, self.scaler = init_opt(
@@ -187,6 +195,46 @@ class SupportTrainer:
             return F.smooth_l1_loss(pred.flatten(0, 1), target.flatten(0, 1), reduction="mean")
         raise NotImplementedError(self.loss_mode)
 
+    def _feature_perturb(self, z: torch.Tensor) -> torch.Tensor:
+        corrupted = z.clone()
+        bsz, num_tokens, _ = z.shape
+        side = int(round(num_tokens ** 0.5))
+
+        for b in range(bsz):
+            mask = torch.zeros(num_tokens, device=z.device, dtype=torch.bool)
+            if side * side == num_tokens:
+                grid_mask = mask.view(side, side)
+                for _ in range(max(1, self.perturb_num_blocks)):
+                    ratio = random.uniform(self.perturb_min_ratio, self.perturb_max_ratio)
+                    area = max(1, int(ratio * num_tokens))
+                    block_h = max(1, min(side, int(round(area ** 0.5))))
+                    block_w = max(1, min(side, int(round(area / block_h))))
+                    y0 = random.randint(0, max(0, side - block_h))
+                    x0 = random.randint(0, max(0, side - block_w))
+                    grid_mask[y0:y0 + block_h, x0:x0 + block_w] = True
+            else:
+                count = max(1, int(random.uniform(self.perturb_min_ratio, self.perturb_max_ratio) * num_tokens))
+                mask[torch.randperm(num_tokens, device=z.device)[:count]] = True
+
+            if not mask.any():
+                continue
+
+            mode = random.choice(["noise", "replace", "mean"])
+            if mode == "noise":
+                scale = z[b].detach().float().std().clamp_min(1e-6) * self.perturb_noise_scale
+                corrupted[b, mask] = corrupted[b, mask] + torch.randn_like(corrupted[b, mask]) * scale.to(corrupted.dtype)
+            elif mode == "replace":
+                if bsz > 1:
+                    src = random.choice([i for i in range(bsz) if i != b])
+                    corrupted[b, mask] = z[src, mask]
+                else:
+                    perm = torch.randperm(num_tokens, device=z.device)
+                    corrupted[b, mask] = z[b, perm][mask]
+            else:
+                corrupted[b, mask] = z[b].mean(dim=0, keepdim=True).to(corrupted.dtype)
+
+        return corrupted
+
     def _save_ckpt(self, ep, step=None):
         name = f"{self.tag}-step{step}.pth.tar" if step else f"{self.tag}-ep{ep}.pth.tar"
         torch.save(
@@ -217,15 +265,21 @@ class SupportTrainer:
                 data_ms = (time.perf_counter() - data_start) * 1000.0
                 iter_start = time.perf_counter()
                 imgs = imgs.to(self.device, non_blocking=True)
-                _, imgs_abn = self.cutpaste(imgs, labels)
                 use_clean = np.random.rand() < 0.5
-                query_input = imgs if use_clean else imgs_abn
+                imgs_abn = None
+                if (not use_clean) and self.corruption_mode == "cutpaste":
+                    _, imgs_abn = self.cutpaste(imgs, labels)
                 support, _ = self.support_bank.sample_features(list(labels), list(paths))
 
                 def _step():
                     with autocast(dtype=torch.bfloat16, enabled=self.use_bf16):
                         target = self.model.target_features(imgs, paths, n_layer=self.n_layer)
-                        query = target if use_clean else self.model.target_features(query_input, paths, n_layer=self.n_layer)
+                        if use_clean:
+                            query = target
+                        elif self.corruption_mode == "cutpaste":
+                            query = self.model.target_features(imgs_abn, paths, n_layer=self.n_layer)
+                        else:
+                            query = self._feature_perturb(target)
                         out = self.model.predict(query, support)
                         pred = out["pred"]
                         recon = self._loss_fn(pred, target)

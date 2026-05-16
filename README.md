@@ -100,7 +100,7 @@ relevance gate           : MLP over [z_q, C, max_match_weight, match_entropy]
 anomaly score            : gate * ||z_q - z_hat_q||^2
 ```
 
-Training uses mixed multi-class episodes. Each episode samples K normal support images and one normal query from the same category. To stay close to the original FoundAD setting, query input follows the same 50/50 clean-vs-CutPaste branch: clean episodes train identity consistency, and CutPaste episodes train prediction toward the clean query feature. The gate uses a small synthetic latent-deviation auxiliary loss by default; set `meta.gate_weight=0.0` to use only `L_pred + identity_weight * L_id`.
+Training uses mixed multi-class episodes. Each episode samples K normal support images and one normal query from the same category. By default, SC-JEPA uses a 50/50 clean-vs-feature-perturbation branch: clean episodes train identity consistency, and corrupted episodes perturb query tokens directly in feature space before predicting the clean query feature. This keeps synthetic corruption simple and support-relative instead of relying on image-space CutPaste realism. Set `app.meta.corruption_mode=cutpaste` to recover the FoundAD-style image-space branch. The gate uses a small synthetic latent-deviation auxiliary loss by default; set `meta.gate_weight=0.0` to use only `L_pred + identity_weight * L_id`.
 
 Train it with:
 

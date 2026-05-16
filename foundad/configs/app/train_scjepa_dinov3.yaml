@@ -19,6 +19,11 @@ meta:
   dropout: 0.0
   identity_weight: 0.25
   gate_weight: 0.05
+  corruption_mode: 'feature_perturbation'  # feature_perturbation | cutpaste
+  perturb_min_ratio: 0.02
+  perturb_max_ratio: 0.15
+  perturb_noise_scale: 0.25
+  perturb_num_blocks: 2
   torch_home: ''
   torchhub_dir: ''
   dinov3_repo: ''
@@ -30,4 +35,3 @@ meta:
 logging:
   folder: logs/${data.data_name}/${app.meta.model}_scjepa${oc.select:diy_name,""}
   write_tag: train
-
