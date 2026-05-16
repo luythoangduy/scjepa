@@ -96,6 +96,28 @@ class SupportBank:
         return torch.stack(features, dim=0), path_groups
 
 
+class FeatureBank:
+    def __init__(self):
+        self.cache = {}
+
+    @torch.inference_mode()
+    def build(self, model, loader, device: torch.device, n_layer: int, use_bf16: bool = False):
+        model.encoder.eval()
+        for imgs, _, paths in loader:
+            imgs = imgs.to(device, non_blocking=True)
+            with autocast(dtype=torch.bfloat16, enabled=use_bf16):
+                feats = model.target_features(imgs, paths, n_layer=n_layer)
+            for path, feat in zip(paths, feats):
+                self.cache[path] = feat.detach()
+        logger.info("Cached %d clean query features", len(self.cache))
+
+    def get(self, paths: List[str]) -> torch.Tensor:
+        missing = [path for path in paths if path not in self.cache]
+        if missing:
+            raise KeyError(f"Missing cached features for {missing[:3]}")
+        return torch.stack([self.cache[path] for path in paths], dim=0)
+
+
 class SupportTrainer:
     def __init__(self, args: Dict[str, Any]):
         self.args = args
@@ -146,6 +168,9 @@ class SupportTrainer:
         )
         self.support_bank = SupportBank(dcfg["train_root"], mcfg["crop_size"], self.support_shots)
         self.support_bank.build_feature_cache(self.model, self.device, self.n_layer, self.use_bf16)
+        self.feature_bank = FeatureBank()
+        self.feature_bank.build(self.model, self.loader, self.device, self.n_layer, self.use_bf16)
+        self.sampler.set_epoch(0)
         self.cutpaste = CutPasteUnion(colorJitter=0.5)
 
         ocfg = args["optimization"]
@@ -212,7 +237,7 @@ class SupportTrainer:
 
                 def _step():
                     with autocast(dtype=torch.bfloat16, enabled=self.use_bf16):
-                        target = self.model.target_features(imgs, paths, n_layer=self.n_layer)
+                        target = self.feature_bank.get(list(paths))
                         query = target if use_clean else self.model.target_features(query_input, paths, n_layer=self.n_layer)
                         out = self.model.predict(query, support)
                         pred = out["pred"]
