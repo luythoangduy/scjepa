@@ -94,13 +94,13 @@ support images -> frozen DINOv3 -> support tokens
 query image    -> frozen DINOv3 -> query tokens
 
 support aggregation      : mean or learned position-wise aggregation
-support-query matcher    : top-m semantic token matching with optional relative-position bias
+support-query matcher    : windowed top-m semantic matching with optional relative-position bias
 conditional predictor    : transformer over [z_q, C, z_q - C]
 relevance gate           : MLP over [z_q, C, max_match_weight, match_entropy]
 anomaly score            : gate * ||z_q - z_hat_q||^2
 ```
 
-Training uses mixed multi-class episodes. Each episode samples K normal support images and one normal query from the same category. By default, SC-JEPA uses a 50/50 clean-vs-feature-perturbation branch: clean episodes train identity consistency, and corrupted episodes perturb query tokens directly in feature space before predicting the clean query feature. This keeps synthetic corruption simple and support-relative instead of relying on image-space CutPaste realism. Set `app.meta.corruption_mode=cutpaste` to recover the FoundAD-style image-space branch. The gate uses a small synthetic latent-deviation auxiliary loss by default; set `meta.gate_weight=0.0` to use only `L_pred + identity_weight * L_id`.
+Training uses mixed multi-class episodes. Each episode samples K normal support images and one normal query from the same category. By default, SC-JEPA uses a 50/50 clean-vs-feature-perturbation branch: clean episodes train identity consistency, and corrupted episodes perturb query tokens directly in feature space before predicting the clean query feature. The support-query matcher uses windowed cross-attention by default (`matcher_mode=window`, `window_size=4`) so neighboring query tokens share a local support region instead of matching independently against the whole image. This keeps synthetic corruption simple and support-relative instead of relying on image-space CutPaste realism. Set `app.meta.corruption_mode=cutpaste` to recover the FoundAD-style image-space branch, or `app.meta.matcher_mode=global` to use the original global top-m matcher. The gate uses a small synthetic latent-deviation auxiliary loss by default; set `meta.gate_weight=0.0` to use only `L_pred + identity_weight * L_id`.
 
 Train it with:
 

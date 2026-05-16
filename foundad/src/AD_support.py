@@ -35,6 +35,9 @@ def _build_model(meta: Dict[str, Any]) -> SupportConditionedVisionModule:
         use_rel_pos=meta.get("use_rel_pos", True),
         rel_pos_weight=meta.get("rel_pos_weight", 0.1),
         dropout=meta.get("dropout", 0.0),
+        matcher_mode=meta.get("matcher_mode", "window"),
+        window_size=meta.get("window_size", 4),
+        window_shift=meta.get("window_shift", 0),
         encoder_cfg=meta,
     )
 

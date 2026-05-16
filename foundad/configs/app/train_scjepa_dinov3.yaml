@@ -14,6 +14,9 @@ meta:
   top_m: 8
   n_heads: 8
   support_aggregation: 'mean'  # mean | learned
+  matcher_mode: 'window'       # window | global
+  window_size: 4
+  window_shift: 0
   use_rel_pos: true
   rel_pos_weight: 0.1
   dropout: 0.0
