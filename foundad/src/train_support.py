@@ -120,12 +120,14 @@ class SupportTrainer:
             matcher_mode=mcfg.get("matcher_mode", "window"),
             window_size=mcfg.get("window_size", 4),
             window_shift=mcfg.get("window_shift", 0),
+            use_gate=mcfg.get("use_gate", False),
             encoder_cfg=mcfg,
         )
         self.n_layer = mcfg.get("n_layer", 3)
         self.loss_mode = mcfg.get("loss_mode", "l2")
         self.identity_weight = float(mcfg.get("identity_weight", 0.25))
-        self.gate_weight = float(mcfg.get("gate_weight", 0.05))
+        self.use_gate = bool(mcfg.get("use_gate", False))
+        self.gate_weight = float(mcfg.get("gate_weight", 0.05)) if self.use_gate else 0.0
         self.support_shots = int(mcfg.get("support_shots", args["data"].get("support_shots", 4)))
         self.use_bf16 = mcfg["use_bfloat16"]
         self.corruption_mode = mcfg.get("corruption_mode", "feature_perturbation")
@@ -136,6 +138,7 @@ class SupportTrainer:
         if self.corruption_mode not in {"feature_perturbation", "cutpaste"}:
             raise ValueError(f"Unsupported corruption_mode: {self.corruption_mode}")
         logger.info("SC-JEPA corruption mode: %s", self.corruption_mode)
+        logger.info("SC-JEPA use_gate: %s", self.use_gate)
 
         self.model.predictor.requires_grad_(True)
         if self.model.projector:

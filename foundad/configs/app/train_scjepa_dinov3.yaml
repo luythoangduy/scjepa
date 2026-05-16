@@ -17,11 +17,12 @@ meta:
   matcher_mode: 'window'       # window | global
   window_size: 4
   window_shift: 0
+  use_gate: false
   use_rel_pos: true
   rel_pos_weight: 0.1
   dropout: 0.0
   identity_weight: 0.25
-  gate_weight: 0.05
+  gate_weight: 0.0
   corruption_mode: 'feature_perturbation'  # feature_perturbation | cutpaste
   perturb_min_ratio: 0.02
   perturb_max_ratio: 0.15

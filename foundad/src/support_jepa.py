@@ -222,8 +222,10 @@ class SupportConditionedPredictor(nn.Module):
         matcher_mode: str = "window",
         window_size: int = 4,
         window_shift: int = 0,
+        use_gate: bool = False,
     ):
         super().__init__()
+        self.use_gate = use_gate
         self.aggregator = SupportAggregator(embed_dim, mode=aggregation)
         self.matcher = SupportQueryMatcher(
             embed_dim=embed_dim,
@@ -244,9 +246,12 @@ class SupportConditionedPredictor(nn.Module):
         support_agg = self.aggregator(support)
         context, top_weights, top_sim = self.matcher(query, support_agg)
         pred = self.predictor(query, context)
-        relevance = self.gate(query, context, top_weights)
         residual = (query - pred).pow(2).sum(dim=-1)
-        score = relevance * residual
+        if self.use_gate or not self.training:
+            relevance = self.gate(query, context, top_weights)
+        else:
+            relevance = torch.ones_like(residual)
+        score = relevance * residual if self.use_gate else residual
         return {
             "pred": pred,
             "support_agg": support_agg,
@@ -278,6 +283,7 @@ class SupportConditionedVisionModule(VisionModule):
         matcher_mode: str = "window",
         window_size: int = 4,
         window_shift: int = 0,
+        use_gate: bool = False,
         **_: object,
     ):
         super().__init__(
@@ -302,6 +308,7 @@ class SupportConditionedVisionModule(VisionModule):
             matcher_mode=matcher_mode,
             window_size=window_size,
             window_shift=window_shift,
+            use_gate=use_gate,
         )
         if use_cuda and torch.cuda.is_available():
             self.cuda()

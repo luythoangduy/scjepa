@@ -38,6 +38,7 @@ def _build_model(meta: Dict[str, Any]) -> SupportConditionedVisionModule:
         matcher_mode=meta.get("matcher_mode", "window"),
         window_size=meta.get("window_size", 4),
         window_shift=meta.get("window_shift", 0),
+        use_gate=meta.get("use_gate", False),
         encoder_cfg=meta,
     )
 

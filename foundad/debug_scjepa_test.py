@@ -33,6 +33,7 @@ def _default_cfg() -> Dict[str, Any]:
             "matcher_mode": "window",
             "window_size": 4,
             "window_shift": 0,
+            "use_gate": False,
             "use_rel_pos": True,
             "rel_pos_weight": 0.1,
             "dropout": 0.0,
