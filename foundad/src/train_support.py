@@ -4,6 +4,7 @@ import logging
 import os
 import random
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -174,7 +175,9 @@ class SupportTrainer:
             ("%.5f", "recon"),
             ("%.5f", "identity"),
             ("%.5f", "gate"),
-            ("%d", "time (ms)"),
+            ("%d", "gpu_time_ms"),
+            ("%d", "data_time_ms"),
+            ("%d", "iter_time_ms"),
         )
 
     def _loss_fn(self, pred, target):
@@ -202,8 +205,17 @@ class SupportTrainer:
         for ep in range(self.epochs):
             logger.info("Epoch %d", ep + 1)
             self.sampler.set_epoch(ep)
-            loss_m, time_m = AverageMeter(), AverageMeter()
-            for itr, (imgs, labels, paths) in enumerate(self.loader):
+            loss_m, gpu_time_m, data_time_m, iter_time_m = AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
+            loader_iter = iter(self.loader)
+            itr = 0
+            data_start = time.perf_counter()
+            while True:
+                try:
+                    imgs, labels, paths = next(loader_iter)
+                except StopIteration:
+                    break
+                data_ms = (time.perf_counter() - data_start) * 1000.0
+                iter_start = time.perf_counter()
                 imgs = imgs.to(self.device, non_blocking=True)
                 _, imgs_abn = self.cutpaste(imgs, labels)
                 use_clean = np.random.rand() < 0.5
@@ -235,15 +247,20 @@ class SupportTrainer:
                     loss.backward()
                     self.optimizer.step()
                 self.optimizer.zero_grad()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                iter_ms = (time.perf_counter() - iter_start) * 1000.0
                 loss_m.update(loss.item())
-                time_m.update(t)
+                gpu_time_m.update(t)
+                data_time_m.update(data_ms)
+                iter_time_m.update(iter_ms)
                 gstep += 1
                 if gstep % 100 == 0:
                     self._save_ckpt(ep, gstep)
-                self.csv_logger.log(ep + 1, itr, loss.item(), recon.item(), identity.item(), gate_loss.item(), t)
+                self.csv_logger.log(ep + 1, itr, loss.item(), recon.item(), identity.item(), gate_loss.item(), t, data_ms, iter_ms)
                 if itr % 100 == 0:
                     logger.info(
-                        "[E %d I %d] loss %.6f recon %.6f id %.6f gate %.6f avg %.6f mem %.2fMB (%.1fms)",
+                        "[E %d I %d] loss %.6f recon %.6f id %.6f gate %.6f avg %.6f mem %.2fMB gpu %.1fms data %.1fms iter %.1fms",
                         ep + 1,
                         itr,
                         loss.item(),
@@ -252,8 +269,12 @@ class SupportTrainer:
                         gate_loss.item(),
                         loss_m.avg,
                         torch.cuda.max_memory_allocated() / 1024**2 if torch.cuda.is_available() else 0,
-                        time_m.avg,
+                        gpu_time_m.avg,
+                        data_time_m.avg,
+                        iter_time_m.avg,
                     )
+                itr += 1
+                data_start = time.perf_counter()
             if self.scheduler is not None:
                 self.scheduler.step()
 
