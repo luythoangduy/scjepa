@@ -10,7 +10,7 @@ mode: train
 
 data:
   batch_size: 8
-  num_workers: 0
+  num_workers: 8
   pin_mem: true
   dataset: dataset-name
   data_name: fewshot-folder-name

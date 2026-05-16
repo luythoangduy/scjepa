@@ -30,3 +30,4 @@ meta:
 logging:
   folder: logs/${data.data_name}/${app.meta.model}_scjepa${oc.select:diy_name,""}
   write_tag: train
+

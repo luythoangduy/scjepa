@@ -305,6 +305,7 @@ def build_dataloader(
     root: str,
     batch_size: int,
     pin_mem: bool = True,
+    num_workers: int = 8,
     **kwargs,
 ):
     """Return (dataset, dataloader, sampler).
@@ -340,6 +341,8 @@ def build_dataloader(
         sampler=sampler,
         shuffle=(sampler is None and mode == "test"),
         pin_memory=pin_mem,
+        num_workers=num_workers,
+        persistent_workers=num_workers > 0,
         drop_last=drop_last,
     )
 

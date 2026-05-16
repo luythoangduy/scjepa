@@ -50,6 +50,7 @@ class Trainer:
             root=dcfg["train_root"],
             batch_size=dcfg["batch_size"],
             pin_mem=dcfg["pin_mem"],
+            num_workers=dcfg.get("num_workers", 8),
             resize=mcfg["crop_size"],
             use_hflip=dcfg.get("use_hflip",False),
             use_vflip=dcfg.get("use_vflip",False),

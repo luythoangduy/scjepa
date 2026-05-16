@@ -35,6 +35,7 @@ class SupportBank:
         self.root = Path(train_root) / "train"
         self.shots = shots
         self.transform = transforms.Compose(build_base_transform(resize))
+        self.feature_cache = None
         self.paths = {
             p.name: sorted([x for x in p.iterdir() if x.is_file()])
             for p in self.root.iterdir()
@@ -57,6 +58,42 @@ class SupportBank:
             images.append(torch.stack(imgs, dim=0))
             path_groups.append([str(p) for p in chosen])
         return torch.stack(images, dim=0), path_groups
+
+    @torch.inference_mode()
+    def build_feature_cache(self, model, device: torch.device, n_layer: int, use_bf16: bool = False):
+        feature_cache = {}
+        model.encoder.eval()
+        for label, paths in self.paths.items():
+            imgs = [self.transform(Image.open(p).convert("RGB")) for p in paths]
+            imgs = torch.stack(imgs, dim=0).to(device, non_blocking=True)
+            path_strs = [str(p) for p in paths]
+            with autocast(dtype=torch.bfloat16, enabled=use_bf16):
+                feats = model.target_features(imgs, path_strs, n_layer=n_layer)
+            feature_cache[label] = {
+                "paths": path_strs,
+                "features": feats.detach(),
+            }
+            logger.info("Cached %d support features for class %s", len(path_strs), label)
+        self.feature_cache = feature_cache
+
+    def sample_features(self, labels: List[str], avoid_paths: List[str] | None = None):
+        if self.feature_cache is None:
+            raise RuntimeError("Support feature cache has not been built.")
+
+        features, path_groups = [], []
+        avoid_paths = avoid_paths or [""] * len(labels)
+        for label, avoid in zip(labels, avoid_paths):
+            cached = self.feature_cache[label]
+            paths = cached["paths"]
+            pool = [i for i, path in enumerate(paths) if path != avoid] or list(range(len(paths)))
+            if len(pool) >= self.shots:
+                chosen = random.sample(pool, self.shots)
+            else:
+                chosen = random.choices(pool, k=self.shots)
+            idx = torch.as_tensor(chosen, device=cached["features"].device, dtype=torch.long)
+            features.append(cached["features"].index_select(0, idx))
+            path_groups.append([paths[i] for i in chosen])
+        return torch.stack(features, dim=0), path_groups
 
 
 class SupportTrainer:
@@ -98,6 +135,7 @@ class SupportTrainer:
             root=dcfg["train_root"],
             batch_size=dcfg["batch_size"],
             pin_mem=dcfg["pin_mem"],
+            num_workers=dcfg.get("num_workers", 8),
             resize=mcfg["crop_size"],
             use_hflip=dcfg.get("use_hflip", False),
             use_vflip=dcfg.get("use_vflip", False),
@@ -107,6 +145,7 @@ class SupportTrainer:
             use_blur=dcfg.get("use_blur", False),
         )
         self.support_bank = SupportBank(dcfg["train_root"], mcfg["crop_size"], self.support_shots)
+        self.support_bank.build_feature_cache(self.model, self.device, self.n_layer, self.use_bf16)
         self.cutpaste = CutPasteUnion(colorJitter=0.5)
 
         ocfg = args["optimization"]
@@ -169,14 +208,12 @@ class SupportTrainer:
                 _, imgs_abn = self.cutpaste(imgs, labels)
                 use_clean = np.random.rand() < 0.5
                 query_input = imgs if use_clean else imgs_abn
-                support_imgs, support_paths = self.support_bank.sample(list(labels), list(paths))
-                support_imgs = support_imgs.to(self.device, non_blocking=True)
+                support, _ = self.support_bank.sample_features(list(labels), list(paths))
 
                 def _step():
                     with autocast(dtype=torch.bfloat16, enabled=self.use_bf16):
                         target = self.model.target_features(imgs, paths, n_layer=self.n_layer)
-                        query = self.model.target_features(query_input, paths, n_layer=self.n_layer)
-                        support = self.model.support_features(support_imgs, support_paths, n_layer=self.n_layer)
+                        query = target if use_clean else self.model.target_features(query_input, paths, n_layer=self.n_layer)
                         out = self.model.predict(query, support)
                         pred = out["pred"]
                         recon = self._loss_fn(pred, target)

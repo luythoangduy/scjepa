@@ -84,6 +84,7 @@ def _evaluate_single_ckpt(ckpt: Path, cfg: Dict[str, Any]) -> None:
             mode="test",
             root=cfg["data"]["test_root"],
             batch_size=1,
+            num_workers=cfg["data"].get("num_workers", 8),
             classname=cls,
             resize=crop,
             datasetname=dataset_name,
