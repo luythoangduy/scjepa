@@ -128,6 +128,20 @@ python foundad/debug_scjepa_cutpaste.py \
 
 The figure shows clean input, CutPaste query, the CutPaste difference map, support-query similarity, match weights, gate, predictor residual, and final score overlay.
 
+Debug one real test image per class:
+
+```bash
+python foundad/debug_scjepa_test.py \
+  --params logs/mvtec_1shot/dinov3_scjepa_scjepa/params.yaml \
+  --ckpt logs/mvtec_1shot/dinov3_scjepa_scjepa/train-step500.pth.tar \
+  --train-root /workspace/data/mvtec_1shot \
+  --test-root /workspace/data/mvtec \
+  --dinov3-weights /workspace/scjepa/weights/dinov3-vitb16-hf \
+  --output logs/debug_test
+```
+
+By default this writes one anomaly image per class and shows original image, GT mask, score heatmap, support-query similarity, match weights, gate, predictor residual, and score overlay. Use `--classname capsule` for one class, or `--prefer normal` to visualize a normal test image.
+
 The new code lives in `foundad/src/support_jepa.py`, `foundad/src/train_support.py`, and `foundad/src/AD_support.py`.
 
 ### Dataset Preparation
