@@ -67,6 +67,15 @@ python foundad/main.py mode=train app=train_scjepa_dinov3 \
 
 For ViT-L/16, set `app.meta.dinov3_model=dinov3_vitl16` and point `app.meta.dinov3_weights` to the matching `.pth`.
 
+If you downloaded the gated Hugging Face model instead, point `app.meta.dinov3_weights` to the local Hugging Face folder containing `model.safetensors`:
+
+```bash
+python foundad/main.py mode=train app=train_scjepa_dinov3 \
+  app.meta.dinov3_weights=/workspace/scjepa/weights/dinov3-vitb16-hf \
+  data.dataset=mvtec data.data_name=mvtec_1shot data.data_path=/workspace/data \
+  diy_name=_scjepa
+```
+
 
 ## Training and Inference
 

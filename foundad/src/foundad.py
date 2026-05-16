@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from src.utils.tensors import trunc_normal_
 from src.datasets.dataset import build_dataloader
 import src.dinov2.models.vision_transformer as vit
-from transformers import AutoProcessor, SiglipVisionModel, CLIPVisionModel
+from transformers import AutoModel, AutoProcessor, SiglipVisionModel, CLIPVisionModel
 
 
 def _repo_root() -> Path:
@@ -48,6 +48,45 @@ def _hub_load(repo_or_dir: str, model: str, cfg: Optional[Dict[str, Any]] = None
     if source == "local":
         repo_or_dir = str(repo_path)
     return torch.hub.load(repo_or_dir, model, source=source, **kwargs)
+
+
+def _dinov3_hf_id(torch_hub_name: str) -> str:
+    mapping = {
+        "dinov3_vits16": "facebook/dinov3-vits16-pretrain-lvd1689m",
+        "dinov3_vits16plus": "facebook/dinov3-vits16plus-pretrain-lvd1689m",
+        "dinov3_vitb16": "facebook/dinov3-vitb16-pretrain-lvd1689m",
+        "dinov3_vitl16": "facebook/dinov3-vitl16-pretrain-lvd1689m",
+        "dinov3_vith16plus": "facebook/dinov3-vith16plus-pretrain-lvd1689m",
+        "dinov3_vit7b16": "facebook/dinov3-vit7b16-pretrain-lvd1689m",
+    }
+    return mapping.get(torch_hub_name, "facebook/dinov3-vitb16-pretrain-lvd1689m")
+
+
+class HuggingFaceDinoV3Backbone(nn.Module):
+    def __init__(self, model_id_or_path: str, image_size: int = 512):
+        super().__init__()
+        model_path = Path(str(model_id_or_path)).expanduser()
+        kwargs = {"local_files_only": model_path.exists()} if model_path.exists() else {}
+        self.model = AutoModel.from_pretrained(str(model_path) if model_path.exists() else model_id_or_path, **kwargs)
+        self.config = self.model.config
+        self.embed_dim = int(getattr(self.config, "hidden_size"))
+        self.patch_size = int(getattr(self.config, "patch_size", 16))
+        self.num_patches = (int(image_size) // self.patch_size) ** 2
+
+    def get_intermediate_layers(self, imgs: torch.Tensor, n: int = 3, return_class_token: bool = False):
+        out = self.model(pixel_values=imgs, output_hidden_states=True)
+        hidden_states = out.hidden_states[1:]
+        n = max(1, min(int(n), len(hidden_states)))
+        layers = hidden_states[-n:]
+        outputs = []
+        expected_patches = (imgs.shape[-2] // self.patch_size) * (imgs.shape[-1] // self.patch_size)
+        for h in layers:
+            patch_tokens = h[:, -expected_patches:, :]
+            if return_class_token:
+                outputs.append((patch_tokens, h[:, 0, :]))
+            else:
+                outputs.append(patch_tokens)
+        return outputs
 
 
 
@@ -107,14 +146,25 @@ class VisionModule(nn.Module):
             dinov3_model = _get_setting(self.encoder_cfg, "dinov3_model", "DINOV3_MODEL", "dinov3_vitb16")
             dinov3_source = _get_setting(self.encoder_cfg, "dinov3_source", "DINOV3_SOURCE")
             dinov3_weights = _get_setting(self.encoder_cfg, "dinov3_weights", "DINOV3_WEIGHTS")
+            dinov3_hf_model = _get_setting(self.encoder_cfg, "dinov3_hf_model", "DINOV3_HF_MODEL")
+            image_size = int(self.encoder_cfg.get("crop_size", 512))
             hub_kwargs = {}
-            if dinov3_weights:
+            weights_path = Path(str(dinov3_weights)).expanduser() if dinov3_weights else None
+            if dinov3_source == "hf" or dinov3_hf_model:
+                enc = HuggingFaceDinoV3Backbone(dinov3_hf_model or _dinov3_hf_id(dinov3_model), image_size=image_size).eval()
+                num_patches, embed_dim = enc.num_patches, enc.embed_dim
+            elif weights_path and (weights_path.is_dir() or weights_path.suffix == ".safetensors"):
+                hf_path = weights_path if weights_path.is_dir() else weights_path.parent
+                enc = HuggingFaceDinoV3Backbone(str(hf_path), image_size=image_size).eval()
+                num_patches, embed_dim = enc.num_patches, enc.embed_dim
+            else:
                 weights_path = Path(str(dinov3_weights)).expanduser()
-                if not weights_path.exists():
+                if dinov3_weights and not weights_path.exists():
                     raise FileNotFoundError(f"DINOv3 weights not found: {weights_path}")
-                hub_kwargs["weights"] = str(weights_path)
-            enc = _hub_load(dinov3_repo, dinov3_model, cfg=self.encoder_cfg, source=dinov3_source, **hub_kwargs).eval()
-            num_patches, embed_dim = enc.patch_embed.num_patches, enc.embed_dim
+                if dinov3_weights:
+                    hub_kwargs["weights"] = str(weights_path)
+                enc = _hub_load(dinov3_repo, dinov3_model, cfg=self.encoder_cfg, source=dinov3_source, **hub_kwargs).eval()
+                num_patches, embed_dim = enc.patch_embed.num_patches, enc.embed_dim
         elif model == "dino":
             enc = _hub_load("facebookresearch/dino:main", "dino_vitb16", cfg=self.encoder_cfg).eval(); num_patches, embed_dim = 1024, enc.embed_dim
         elif model == "siglip":

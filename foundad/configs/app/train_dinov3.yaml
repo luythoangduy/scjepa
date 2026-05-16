@@ -15,6 +15,7 @@ meta:
   dinov3_model: ''
   dinov3_source: ''
   dinov3_weights: ''
+  dinov3_hf_model: ''
 
 logging:
   folder: logs/${data.data_name}/${app.meta.model}${oc.select:diy_name,""}
