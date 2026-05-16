@@ -50,6 +50,23 @@ Or a demo on VisA
 python foundad/main.py mode=demo app=test testing.segmentation_vis=True data.dataset=visa data.data_name=visa_4shot data.test_root=assets/visa
 ```
 
+### DINOv3 Torch Hub cache and local weights
+
+This fork avoids writing to the global `~/.cache/torch` by default. Torch Hub cache is placed under `.cache/torch` inside this repo unless you override it with `SCJEPA_TORCH_HOME`, `SCJEPA_TORCH_HUB_DIR`, or the matching Hydra keys under `app.meta`.
+
+To load DINOv3 from a local checkout and local checkpoint:
+
+```bash
+python foundad/main.py mode=train app=train_scjepa_dinov3 \
+  app.meta.dinov3_repo=/path/to/dinov3 \
+  app.meta.dinov3_source=local \
+  app.meta.dinov3_model=dinov3_vitb16 \
+  app.meta.dinov3_weights=/path/to/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth \
+  data.dataset=mvtec data.data_name=mvtec_4shot data.data_path=/path/to/fewshot-root
+```
+
+For ViT-L/16, set `app.meta.dinov3_model=dinov3_vitl16` and point `app.meta.dinov3_weights` to the matching `.pth`.
+
 
 ## Training and Inference
 

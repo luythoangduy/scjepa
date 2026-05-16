@@ -1,5 +1,7 @@
 
 import multiprocessing as mp
+import os
+from pathlib import Path
 from typing import Any, Dict, Tuple, Optional, List
 import importlib   
 import yaml, numpy as np, torch
@@ -10,6 +12,42 @@ from src.utils.tensors import trunc_normal_
 from src.datasets.dataset import build_dataloader
 import src.dinov2.models.vision_transformer as vit
 from transformers import AutoProcessor, SiglipVisionModel, CLIPVisionModel
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _get_setting(cfg: Optional[Dict[str, Any]], name: str, env_name: str, default=None):
+    value = (cfg or {}).get(name)
+    if value not in (None, ""):
+        return value
+    return os.environ.get(env_name, default)
+
+
+def _configure_torch_hub(cfg: Optional[Dict[str, Any]] = None) -> None:
+    hub_dir = _get_setting(cfg, "torchhub_dir", "SCJEPA_TORCH_HUB_DIR")
+    if hub_dir:
+        hub_dir = Path(hub_dir).expanduser()
+    else:
+        torch_home = Path(
+            _get_setting(cfg, "torch_home", "SCJEPA_TORCH_HOME", _repo_root() / ".cache" / "torch")
+        ).expanduser()
+        os.environ["TORCH_HOME"] = str(torch_home)
+        hub_dir = torch_home / "hub"
+
+    hub_dir.mkdir(parents=True, exist_ok=True)
+    (hub_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
+    torch.hub.set_dir(str(hub_dir))
+
+
+def _hub_load(repo_or_dir: str, model: str, cfg: Optional[Dict[str, Any]] = None, source: Optional[str] = None, **kwargs):
+    _configure_torch_hub(cfg)
+    repo_path = Path(str(repo_or_dir)).expanduser()
+    source = source or ("local" if repo_path.exists() else "github")
+    if source == "local":
+        repo_or_dir = str(repo_path)
+    return torch.hub.load(repo_or_dir, model, source=source, **kwargs)
 
 
 
@@ -23,8 +61,18 @@ class LinearProjector(torch.nn.Module):
 
 
 class VisionModule(nn.Module):
-    def __init__(self, model_name: str, pred_depth: int, pred_emb_dim: int, use_cuda: bool = True, if_pe: bool = True, feat_normed: bool = False):
+    def __init__(
+        self,
+        model_name: str,
+        pred_depth: int,
+        pred_emb_dim: int,
+        use_cuda: bool = True,
+        if_pe: bool = True,
+        feat_normed: bool = False,
+        encoder_cfg: Optional[Dict[str, Any]] = None,
+    ):
         super().__init__()
+        self.encoder_cfg = encoder_cfg or {}
         (self.encoder, self.num_patches, self.embed_dim, self.processor, self.projector) = self._build_encoder(model_name)
         self.model_name = model_name
 
@@ -53,12 +101,22 @@ class VisionModule(nn.Module):
 
         projector = processor = None
         if model == "dinov2":
-            enc = torch.hub.load("facebookresearch/dinov2", "dinov2_vitb14").eval(); num_patches, embed_dim = enc.patch_embed.num_patches, enc.embed_dim
+            enc = _hub_load("facebookresearch/dinov2", "dinov2_vitb14", cfg=self.encoder_cfg).eval(); num_patches, embed_dim = enc.patch_embed.num_patches, enc.embed_dim
         elif model == "dinov3":
-            enc = torch.hub.load("facebookresearch/dinov3", 'dinov3_vitb16', source="github").eval()
+            dinov3_repo = _get_setting(self.encoder_cfg, "dinov3_repo", "DINOV3_REPO", "facebookresearch/dinov3")
+            dinov3_model = _get_setting(self.encoder_cfg, "dinov3_model", "DINOV3_MODEL", "dinov3_vitb16")
+            dinov3_source = _get_setting(self.encoder_cfg, "dinov3_source", "DINOV3_SOURCE")
+            dinov3_weights = _get_setting(self.encoder_cfg, "dinov3_weights", "DINOV3_WEIGHTS")
+            hub_kwargs = {}
+            if dinov3_weights:
+                weights_path = Path(str(dinov3_weights)).expanduser()
+                if not weights_path.exists():
+                    raise FileNotFoundError(f"DINOv3 weights not found: {weights_path}")
+                hub_kwargs["weights"] = str(weights_path)
+            enc = _hub_load(dinov3_repo, dinov3_model, cfg=self.encoder_cfg, source=dinov3_source, **hub_kwargs).eval()
             num_patches, embed_dim = enc.patch_embed.num_patches, enc.embed_dim
         elif model == "dino":
-            enc = torch.hub.load("facebookresearch/dino:main", "dino_vitb16").eval(); num_patches, embed_dim = 1024, enc.embed_dim
+            enc = _hub_load("facebookresearch/dino:main", "dino_vitb16", cfg=self.encoder_cfg).eval(); num_patches, embed_dim = 1024, enc.embed_dim
         elif model == "siglip":
             enc = SiglipVisionModel.from_pretrained("google/siglip-base-patch16-512").eval(); processor = AutoProcessor.from_pretrained("google/siglip-base-patch16-512"); num_patches, embed_dim = 1024, 768
         elif model == "clip":

@@ -191,6 +191,7 @@ class SupportConditionedVisionModule(VisionModule):
         use_cuda: bool = True,
         if_pe: bool = True,
         feat_normed: bool = False,
+        encoder_cfg=None,
         top_m: int = 8,
         n_heads: int = 8,
         aggregation: str = "mean",
@@ -206,6 +207,7 @@ class SupportConditionedVisionModule(VisionModule):
             use_cuda=use_cuda,
             if_pe=if_pe,
             feat_normed=feat_normed,
+            encoder_cfg=encoder_cfg,
         )
         self.predictor = SupportConditionedPredictor(
             embed_dim=self.embed_dim,
@@ -230,4 +232,3 @@ class SupportConditionedVisionModule(VisionModule):
 
     def predict(self, query: torch.Tensor, support: torch.Tensor):
         return self.predictor(query, support)
-

@@ -79,6 +79,7 @@ class SupportTrainer:
             use_rel_pos=mcfg.get("use_rel_pos", True),
             rel_pos_weight=mcfg.get("rel_pos_weight", 0.1),
             dropout=mcfg.get("dropout", 0.0),
+            encoder_cfg=mcfg,
         )
         self.n_layer = mcfg.get("n_layer", 3)
         self.loss_mode = mcfg.get("loss_mode", "l2")

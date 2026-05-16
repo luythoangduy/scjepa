@@ -9,6 +9,12 @@ meta:
   n_layer: 3
   feat_normed: false
   loss_mode: 'l2'  # l2 or smooth_l1
+  torch_home: ''
+  torchhub_dir: ''
+  dinov3_repo: ''
+  dinov3_model: ''
+  dinov3_source: ''
+  dinov3_weights: ''
 
 logging:
   folder: logs/${data.data_name}/${app.meta.model}${oc.select:diy_name,""}

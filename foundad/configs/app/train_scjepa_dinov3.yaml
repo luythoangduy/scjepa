@@ -19,6 +19,12 @@ meta:
   dropout: 0.0
   identity_weight: 0.25
   gate_weight: 0.05
+  torch_home: ''
+  torchhub_dir: ''
+  dinov3_repo: ''
+  dinov3_model: ''
+  dinov3_source: ''
+  dinov3_weights: ''
 
 logging:
   folder: logs/${data.data_name}/${app.meta.model}_scjepa${oc.select:diy_name,""}

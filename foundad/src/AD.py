@@ -30,6 +30,7 @@ def _build_model(meta: Dict[str, Any]) -> VisionModule:
         pred_emb_dim=meta["pred_emb_dim"],
         if_pe=meta.get("if_pred_pe", True),
         feat_normed=meta.get("feat_normed", False),
+        encoder_cfg=meta,
     )
 
 @torch.inference_mode()
