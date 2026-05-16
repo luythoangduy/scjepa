@@ -114,6 +114,20 @@ Evaluate it with:
 python foundad/main.py mode=AD data.dataset=mvtec data.data_name=mvtec_4shot data.test_root=/path/to/mvtec app=test_scjepa app.ckpt_step=1950 diy_name=_scjepa
 ```
 
+Debug the CutPaste feature flow with one visualization:
+
+```bash
+python foundad/debug_scjepa_cutpaste.py \
+  --params logs/mvtec_1shot/dinov3_scjepa_scjepa/params.yaml \
+  --ckpt logs/mvtec_1shot/dinov3_scjepa_scjepa/train-step500.pth.tar \
+  --train-root /workspace/data/mvtec_1shot \
+  --dinov3-weights /workspace/scjepa/weights/dinov3-vitb16-hf \
+  --classname capsule \
+  --output logs/debug_cutpaste
+```
+
+The figure shows clean input, CutPaste query, the CutPaste difference map, support-query similarity, match weights, gate, predictor residual, and final score overlay.
+
 The new code lives in `foundad/src/support_jepa.py`, `foundad/src/train_support.py`, and `foundad/src/AD_support.py`.
 
 ### Dataset Preparation
